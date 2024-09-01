@@ -1,0 +1,29 @@
+sites to scrape:
+https://www.fragrantica.com/
+note: youd need to create a headless selenium and then if you get blocked youd need to switch your vpn, very very time consuming
+
+https://www.fragrancesoftheworld.com/
+note: 54k fragrances, but it costs 300 dollars to get access to the database.
+
+to make memory usage lighter:
+gradient checkpointing,
+automatic mixed precision,
+reduced batch size,
+parameter offloading?
+flash_attn?
+learner optimizer?
+
+
+todo in try/app.py:
+- add a way to scrape the data from the websites
+- add a way to train the model
+- add a way to predict the fragrance
+- add a way to save the model
+- add a way to offload some of the model to disk/cpu
+- add a way to order by seasons, scents, notes, etc.
+- add a way to get the most similar fragrances
+- add a way to get the most different fragrances
+- add a way to get the most popular fragrances
+- add a way to get the most underrated fragrances
+
+- add a way to get chats with memory by offloading parts of it to the disk.!!!!!!
