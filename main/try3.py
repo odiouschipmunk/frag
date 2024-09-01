@@ -109,6 +109,7 @@ def rag(query, top_k=10):
         conn.close()
 async def generate_ai_answer(question):
     global messages
+    start=time.time()
     messages.append({"role": "user", "content": question})
     messages = truncate_messages(messages, MAX_SEQUENCE_LENGTH)
     embed_answer = rag(question)
@@ -146,12 +147,9 @@ async def generate_ai_answer(question):
 
         # Clear GPU memory after inference
         torch.cuda.empty_cache()
-        history=outputs[0]['generated_text'][-1]
-        to_return=history
-        outputs[0]['generated_text']=outputs[0]['generated_text'][:-2]
-        history=json.dumps(history)
-        messages.append({"role": "system", "content": "Here is what you have written in the past: "+history})
-        return to_return
+        end=time.time()
+        print("Time taken to generate answer: ",end-start)
+        return outputs[0]['generated_text'][-1]
 
     except Exception as e:
         print(f"Error generating AI answer: {e}")

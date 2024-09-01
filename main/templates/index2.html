@@ -46,50 +46,32 @@
     <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
     <script>
         $(document).ready(function() {
-            $('#embedding-form').on('submit', function(event) {
-                event.preventDefault();
-                var query = $('#query').val();
-                $('#embedding-results').html('<div class="spinner-border" role="status"><span class="sr-only">Loading...</span></div>');
-                $.ajax({
-                    url: '/query',
-                    method: 'POST',
-                    contentType: 'application/json',
-                    data: JSON.stringify({ query: query }),
-                    success: function(response) {
-                        var resultsHtml = '<ul class="list-group">';
-                        response.forEach(function(result) {
-                            resultsHtml += '<li class="list-group-item">' +'<a href="' +result[0] +'"> '+result[0]+'</a>'+ ' - Score: ' + result[1].toFixed(2) + '</li>';
-                        });
-                        resultsHtml += '</ul>';
-                        $('#embedding-results').html(resultsHtml);
-                    },
-                    error: function() {
-                        $('#embedding-results').html('<div class="alert alert-danger" role="alert">An error occurred while processing your request.</div>');
-                    }
-                });
-            });
-    
             $('#ai-form').on('submit', function(event) {
                 event.preventDefault();
                 var question = $('#question').val();
                 $('#ai-results').html('<div class="spinner-border" role="status"><span class="sr-only">Loading...</span></div>');
-                var eventSource = new EventSource('/stream_ai?question=' + encodeURIComponent(question));
-                var content = '';
-                eventSource.onmessage = function(event) {
-                    content += event.data;
-                    var formattedContent = content.replace(/\\n\\n/g, '</p><p>').replace(/\\n/g, '<br>');
-                    formattedContent = formattedContent.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>'); // Bold text
-                    formattedContent = formattedContent.replace(/- (.*?)(<br>|<\/p>)/g, '<li>$1</li>$2'); // List items
-                    formattedContent = formattedContent.replace(/<li>(.*?)<\/li><br>/g, '<li>$1</li>'); // Remove <br> after list items
-                    formattedContent = formattedContent.replace(/<li>(.*?)<\/li>/g, '<ul><li>$1</li></ul>'); // Wrap list items in <ul>
-                    formattedContent = formattedContent.replace(/<\/ul><ul>/g, ''); // Remove consecutive <ul> tags
-                    formattedContent = formattedContent.replace(/\\"/g, '"'); // Replace escaped double quotes with regular double quotes
-                    $('#ai-results').html('<div class="alert alert-success" role="alert"><p>' + formattedContent + '</p></div>');
-                };
-                eventSource.onerror = function() {
-                    $('#ai-results').html('<div class="alert alert-danger" role="alert">An error occurred while processing your request.</div>');
-                    eventSource.close();
-                };
+                $.ajax({
+                    url: '/ai',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ question: question }),
+                    success: function(response) {
+                        var taskId = response.task_id;
+                        var eventSource = new EventSource('/stream_ai_answer/' + taskId);
+                        eventSource.onmessage = function(event) {
+                            $('#ai-results').append('<p>' + event.data + '</p>');
+                        };
+                        eventSource.onerror = function() {
+                            eventSource.close();
+                        };
+                    },
+                    error: function(xhr, status, error) {
+                        console.error("Error: " + error);
+                        console.error("Status: " + status);
+                        console.dir(xhr);
+                        $('#ai-results').html('<div class="alert alert-danger" role="alert">An error occurred while processing your request.</div>');
+                    }
+                });
             });
         });
     </script>

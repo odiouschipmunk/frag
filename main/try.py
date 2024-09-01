@@ -1,7 +1,7 @@
 import numpy as np
 import psycopg2
-from transformers import BertTokenizer, BertModel, pipeline, AutoModelForCausalLM, AutoTokenizer
-from flask import Flask, request, jsonify, render_template
+from transformers import BertTokenizer, BertModel
+from flask import Flask, request, jsonify, render_template, Response
 from sentence_transformers import util
 import torch
 import json
@@ -9,6 +9,16 @@ import asyncio
 import aiohttp
 import time
 import ijson
+import vertexai
+from vertexai.generative_models import GenerativeModel
+
+# TODO(developer): Set the following variables and un-comment the lines below
+PROJECT_ID = "your-project-id"
+MODEL_ID = "gemini-1.5-flash-001"
+
+vertexai.init(project=PROJECT_ID, location="us-central1")
+
+model = GenerativeModel(MODEL_ID)
 
 app = Flask(__name__)
 
@@ -17,23 +27,6 @@ model_path = r'C:\Users\default.DESKTOP-7FKFEEG\project\model2'
 tokenizer_path = r'C:\Users\default.DESKTOP-7FKFEEG\project\tokenizer2'
 etokenizer = BertTokenizer.from_pretrained(tokenizer_path)
 emodel = BertModel.from_pretrained(model_path)
-
-# Load the text generation model
-
-try:
-
-    tokenizer = AutoTokenizer.from_pretrained("microsoft/Phi-3.5-mini-instruct") 
-    model = AutoModelForCausalLM.from_pretrained( 
-    "microsoft/Phi-3.5-mini-instruct",  
-    device_map="cuda",  
-    torch_dtype="auto",  
-    trust_remote_code=True,  
-) 
-    text_gen_pipeline=pipeline("text-generation", model=model, tokenizer=tokenizer)
-    print("Pipeline initialized successfully.")
-except Exception as e:
-    print(f"Error initializing pipeline: {e}")
-    text_gen_pipeline = None
 
 MAX_SEQUENCE_LENGTH = 131072
 
@@ -107,8 +100,10 @@ def rag(query, top_k=10):
         return []
     finally:
         conn.close()
+
 async def generate_ai_answer(question):
     global messages
+    start = time.time()
     messages.append({"role": "user", "content": question})
     messages = truncate_messages(messages, MAX_SEQUENCE_LENGTH)
     embed_answer = rag(question)
@@ -118,7 +113,7 @@ async def generate_ai_answer(question):
             if r is None or r == '':
                 result[i] = "N/A"
         result[10] = float(result[10])
-    to_give=[]
+    to_give = []
     for result in embed_answer:
         if result != "N/A":
             to_give.append(result)
@@ -126,7 +121,6 @@ async def generate_ai_answer(question):
     total = ""
     for result in to_give:
         try:
-            
             total += str(result) + "\n"
         except Exception as e:
             print(f"Error extracting data: {e}")
@@ -135,21 +129,17 @@ async def generate_ai_answer(question):
     # Add logging to track progress
     print("Generating AI answer...")
     try:
-        # Clear GPU memory before inference
-        torch.cuda.empty_cache()
-        outputs=[]
-        print(type(text_gen_pipeline))
-        print(type(outputs))
-        
-        outputs = text_gen_pipeline(messages, max_new_tokens=1000)  # Reduce max_new_tokens
-        print("AI answer generated.")
+        responses = model.generate_content(
+            "Here is data that will help you answer the following question:\n\n" + total, stream=True
+        )
+        generated_text = ""
+        for response in responses:
+            generated_text += response.text
 
-        # Clear GPU memory after inference
-        torch.cuda.empty_cache()
-        history=outputs[0]['generated_text'][-1]
-        outputs[0]['generated_text'].pop().pop()
-        messages.append({"role": "system", "content": "Here is what you have written in the past: "+history})
-        return history
+        print("AI answer generated.")
+        end = time.time()
+        print("Time taken to generate answer: ", end - start)
+        return generated_text
 
     except Exception as e:
         print(f"Error generating AI answer: {e}")
@@ -157,7 +147,7 @@ async def generate_ai_answer(question):
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return render_template('index2.html')
 
 @app.route('/query', methods=['POST'])
 def query():
@@ -189,6 +179,17 @@ async def ai():
     tasks[task_id] = None
     asyncio.create_task(background_task(task_id, question))
     return jsonify({'task_id': task_id})
+
+@app.route('/stream_ai_answer/<task_id>', methods=['GET'])
+def stream_ai_answer(task_id):
+    def generate():
+        while True:
+            answer = tasks.get(task_id)
+            if answer is not None:
+                yield f"data: {answer}\n\n"
+                break
+            time.sleep(1)
+    return Response(generate(), mimetype='text/event-stream')
 
 def query_embeddings(query, top_k=50):
     conn = get_db_connection()
