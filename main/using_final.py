@@ -61,6 +61,26 @@ def get_db_connection():
         print(f"Error connecting to the database: {e}")
         return None
 
+
+def remove_unknown_urls():
+    conn = get_db_connection()
+    if conn is None:
+        print("Failed to connect to the database.")
+        return
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM final WHERE url = 'Unknown' AND perfume_url = 'Unknown'")
+            conn.commit()
+            print("Records with 'Unknown' URLs have been removed.")
+    except Exception as e:
+        print(f"Error removing records: {e}")
+    finally:
+        conn.close()
+
+remove_unknown_urls()
+
+
 def rag(query, top_k=10, batch_size=1000):
     conn = get_db_connection()
     if conn is None:
@@ -68,19 +88,21 @@ def rag(query, top_k=10, batch_size=1000):
 
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM rag")
-            print('line 72')
+            cur.execute("SELECT COUNT(*) FROM final")
             total_records = cur.fetchone()[0]
             num_batches = (total_records // batch_size) + 1
-            print('line 75')
             accumulated_results = []
 
             for batch_num in range(num_batches):
                 offset = batch_num * batch_size
-                cur.execute(f"SELECT * FROM rag LIMIT {batch_size} OFFSET {offset}")
+                cur.execute(f"SELECT * FROM final LIMIT {batch_size} OFFSET {offset}")
                 results = cur.fetchall()
-                print('line 81')
-                if not results:
+                
+                # Log the structure of the results
+                if results:
+                    print("has results!")
+                else:
+                    print(f"Batch {batch_num} returned no results.")
                     continue
 
                 base_notes = [result[1] for result in results]
@@ -107,27 +129,34 @@ def rag(query, top_k=10, batch_size=1000):
                 note = [result[22] for result in results]
 
                 # Filter out invalid embeddings
-                valid_results = [result for result in results if isinstance(result[23], list) and all(isinstance(x, (float, int)) for x in result[23])]
-                embeddings_matrix = np.array([result[23] for result in valid_results], dtype=np.float32)
-                print('line 111')
+                valid_results = []
+                for result in results:
+                    embedding = result[23]
+                    if isinstance(embedding, list) and all(isinstance(x, (float, int)) for sublist in embedding for x in sublist):
+                        valid_results.append(result)
+                    else:
+                        print(f"Invalid embedding in result: {result}")
+
+                if not valid_results:
+                    print(f"Batch {batch_num} has no valid embeddings.")
+                    continue
+
+                embeddings_matrix = np.array([np.array(result[23]).flatten() for result in valid_results], dtype=np.float32)
                 inputs = etokenizer(query, return_tensors='pt')
                 with torch.no_grad():
                     outputs = emodel(**inputs)
                 query_embedding = outputs.last_hidden_state.mean(dim=1).cpu().numpy().astype(np.float32)
                 query_embedding = query_embedding.reshape(1, -1)
                 embeddings_matrix = embeddings_matrix.reshape(len(valid_results), -1)
-                print('line 118')
                 scores = util.pytorch_cos_sim(query_embedding, embeddings_matrix)[0].cpu().numpy()
                 batch_results = sorted(zip(base_notes, middle_notes, top_notes, notes, name, perfumer, description, gender, concepts, all_reviews, positive_reviews, negative_reviews, review, image_url, brand, brand_url, country, perfume_name, release_year, perfume_url, note, urls, scores), key=lambda x: x[22], reverse=True)
-                print('line 121')
                 accumulated_results.extend(batch_results)
-            print('line 123')
+            
             # Filter out null URLs and get top_k non-null results
             non_null_results = [
                 result for result in accumulated_results 
                 if (result[4] != "Unknown" and result[21] != "Unknown") or (result[19] != "Unknown" and result[17] != "Unknown") or (result[19] != "Unknown" and result[4] != "Unknown") or (result[21] != "Unknown" and result[17] != "Unknown")
             ]
-            print('line 129')
             top_results = sorted(non_null_results, key=lambda x: x[22], reverse=True)[:top_k]
 
             # Return only the URL and the score for the top results, converting scores to float
@@ -138,7 +167,6 @@ def rag(query, top_k=10, batch_size=1000):
         return []
     finally:
         conn.close()
-
 
 
 
@@ -186,6 +214,7 @@ async def generate_ai_answer(question):
         torch.cuda.empty_cache()
         end=time.time()
         print("Time taken to generate answer: ",end-start)
+        print(outputs[0]['generated_text'][-1])
         return outputs[0]['generated_text'][-1]
 
     except Exception as e:
@@ -249,7 +278,7 @@ def query_embeddings(query, top_k=50, batch_size=1000):
 
                 urls = [result[10] for result in results]
                 purl = [result[21] for result in results]
-                embeddings_matrix = np.array([result[15] for result in results], dtype=np.float32)
+                embeddings_matrix = np.array([result[23] for result in results], dtype=np.float32)
 
                 inputs = etokenizer(query, return_tensors='pt')
                 with torch.no_grad():
@@ -267,7 +296,7 @@ def query_embeddings(query, top_k=50, batch_size=1000):
             non_null_results = [result for result in accumulated_results if result[0] is not None or result[1] is not None]
             top_results = sorted(non_null_results, key=lambda x: x[2], reverse=True)[:top_k]
 
-            return [(result[0] if result[0] is not None else result[1], float(result[2])) for result in top_results]
+            return [(result[0] if result[0] != "Unknown" else result[1] if result[1] != "Unknown" else "Not able to find link for this fragrance.", float(result[2])) for result in top_results]
 
     except Exception as e:
         print(f"Error querying embeddings: {e}")
