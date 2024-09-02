@@ -133,9 +133,11 @@ async def generate_ai_answer(question):
     for result in embed_answer:
         for i, r in enumerate(result):
             print(type(r))
+            if type(r)==float:
+                result[i]=float(r)
             if r is None or r == '':
                 result[i] = "N/A"
-                
+
         result[22] = float(result[22])
     to_give=[]
     for result in embed_answer:
