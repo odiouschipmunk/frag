@@ -1,28 +1,133 @@
-import pandas as pd
 import json
+import torch
+from transformers import BertTokenizer, BertModel
+import psycopg2
+from psycopg2.extras import execute_values
 
-# Define all attributes
-attributes = [
-    "Base notes", "Middle notes", "Top notes", "Notes", "Name", "Perfumer", 
-    "Description", "Gender", "Concepts", "URL", "All reviews", 
-    "Positive reviews", "Negative reviews", "Image URL"
-]
+# Load the embedding model and tokenizer
+model_path = "C:/Users/default.DESKTOP-7FKFEEG/project/model2"
+tokenizer_path = "C:/Users/default.DESKTOP-7FKFEEG/project/tokenizer2"
+tokenizer = BertTokenizer.from_pretrained(tokenizer_path)
+model = BertModel.from_pretrained(model_path)
 
-# Read CSV file with specified encoding
-csv_df = pd.read_csv(r'C:\Users\default.DESKTOP-7FKFEEG\frag\main\data\final_perfume_data.csv', encoding='ISO-8859-1')
+# Move model to GPU if available
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model.to(device)
 
+# Load the JSON data
+with open(r'C:\Users\default.DESKTOP-7FKFEEG\frag\main\data\final_data.json', 'r', encoding='utf-8') as file:
+    data = json.load(file)
 
-# Ensure all DataFrames have the same columns
-def normalize_df(df, attributes):
-    for attr in attributes:
-        if attr not in df.columns:
-            df[attr] = "N/A"
-    return df[attributes]
+# Function to generate embeddings
+def generate_embedding(text, max_length=512):
+    inputs = tokenizer(text, return_tensors="pt", padding=True, truncation=True, max_length=max_length).to(device)
+    with torch.no_grad():
+        outputs = model(**inputs)
+    embedding = outputs.last_hidden_state.mean(dim=1).cpu().numpy()
+    return embedding
 
-csv_df = normalize_df(csv_df, attributes)
+# Connect to the PostgreSQL database
+conn = psycopg2.connect(
+    dbname="pgvector",
+    user="postgres",
+    password="postgres",
+    host="localhost"
+)
+cur = conn.cursor()
 
-# Merge DataFrames
-merged_df = pd.concat([csv_df], ignore_index=True)
+# Create the "final" table if it doesn't exist
+cur.execute("""
+CREATE TABLE IF NOT EXISTS final (
+    id SERIAL PRIMARY KEY,
+    base_notes TEXT,
+    middle_notes TEXT,
+    top_notes TEXT,
+    notes TEXT,
+    name TEXT,
+    perfumer TEXT,
+    description TEXT,
+    gender TEXT,
+    concepts TEXT,
+    url TEXT,
+    all_reviews TEXT,
+    positive_reviews TEXT,
+    negative_reviews TEXT,
+    review TEXT,
+    image_url TEXT,
+    brand TEXT,
+    brand_url TEXT,
+    country TEXT,
+    perfume_name TEXT,
+    release_year TEXT,
+    perfume_url TEXT,
+    note TEXT,
+    embedding FLOAT8[]
+)
+""")
+conn.commit()
 
-# Save to JSON
-merged_df.to_json('final.json', orient='records', lines=True)
+# Function to upsert data
+def upsert_embedding(base_notes, middle_notes, top_notes, notes, name, perfumer, description, gender, concepts, url, all_reviews, positive_reviews, negative_reviews, review, image_url, brand, brand_url, country, perfume_name, release_year, perfume_url, note, embedding):
+    try:
+        embedding_list = embedding.tolist()  # Ensure this is a list of floats
+        
+        # Verify that the length of embedding_list matches the expected dimensions
+        if not isinstance(embedding_list, list) or not all(isinstance(x, float) for x in embedding_list[0]):
+            raise ValueError("Embedding must be a list of floats")
+
+        sql_query = """
+        INSERT INTO final (base_notes, middle_notes, top_notes, notes, name, perfumer, description, gender, concepts, url, all_reviews, positive_reviews, negative_reviews, review, image_url, brand, brand_url, country, perfume_name, release_year, perfume_url, note, embedding)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        
+        params = (base_notes, middle_notes, top_notes, notes, name, perfumer, description, gender, concepts, url, all_reviews, positive_reviews, negative_reviews, review, image_url, brand, brand_url, country, perfume_name, release_year, perfume_url, note, embedding_list)
+        
+        # Print the SQL query and parameters for debugging
+
+        
+        cur.execute(sql_query, params)
+        conn.commit()
+        print(f"Upserted record for URL: {url}")
+    except Exception as e:
+        conn.rollback()
+        print(f"Error upserting data to the database: {e}")
+
+# Upsert data into the "final" table
+for i, item in enumerate(data):
+    try:
+        text = json.dumps(item)  # Convert the JSON item to a string
+        embedding = generate_embedding(text)
+        upsert_embedding(
+            item.get("Base notes", ""),
+            item.get("Middle notes", ""),
+            item.get("Top notes", ""),
+            item.get("Notes", ""),
+            item.get("Name", ""),
+            item.get("Perfumer", ""),
+            item.get("Description", ""),
+            item.get("Gender", ""),
+            item.get("Concepts", ""),
+            item.get("URL", ""),
+            item.get("All reviews", ""),
+            item.get("Positive reviews", ""),
+            item.get("Negative reviews", ""),
+            item.get("review", ""),
+            item.get("Image URL", ""),
+            item.get("Brand", ""),
+            item.get("Brand URL", ""),
+            item.get("Country", ""),
+            item.get("Perfume Name", ""),
+            item.get("Release Year", ""),
+            item.get("Perfume URL", ""),
+            item.get("Note", ""),
+            embedding
+        )
+        print(f"Inserted item {i+1}/{len(data)}")
+    except Exception as e:
+        print(f"Error inserting item {i+1}: {e}")
+
+# Close the database connection
+cur.close()
+conn.close()
+
+print("Data upserted and embedded successfully.")

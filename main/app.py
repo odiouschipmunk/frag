@@ -74,17 +74,30 @@ def rag(query, top_k=10):
                 return []
 
             # Assuming the first column is the URL and the second column is the embedding
-            urls = [result[10] for result in results]
             base_notes = [result[1] for result in results]
             middle_notes = [result[2] for result in results]
             top_notes = [result[3] for result in results]
             notes = [result[4] for result in results]
             name = [result[5] for result in results]
+            perfumer=[result[6] for result in results]
             description = [result[7] for result in results]
+            gender=[result[8] for result in results]
             concepts = [result[9] for result in results]
+            urls = [result[10] for result in results]
             all_reviews = [result[11] for result in results]
+            positive_reviews = [result[12] for result in results]
+            negative_reviews = [result[13] for result in results]
             review = [result[14] for result in results]
-            embeddings_matrix = np.array([result[15] for result in results], dtype=np.float32)
+            image_url = [result[15] for result in results]
+            brand=[result[16] for result in results]
+            brand_url=[result[17] for result in results]
+            country=[result[18] for result in results]
+            perfume_name=[result[19] for result in results]
+            release_year=[result[20] for result in results]
+            perfume_url=[result[21] for result in results]
+            note=[result[22] for result in results]
+
+            embeddings_matrix = np.array([result[23] for result in results], dtype=np.float32)
 
             inputs = etokenizer(query, return_tensors='pt')
             with torch.no_grad():
@@ -94,10 +107,13 @@ def rag(query, top_k=10):
             embeddings_matrix = embeddings_matrix.reshape(len(results), -1)
 
             scores = util.pytorch_cos_sim(query_embedding, embeddings_matrix)[0].cpu().numpy()
-            sorted_results = sorted(zip(base_notes, middle_notes, top_notes, notes, name, description, concepts, all_reviews, review, urls, scores), key=lambda x: x[10], reverse=True)
+            sorted_results = sorted(zip(base_notes, middle_notes, top_notes, notes, name, perfumer, description, gender, concepts, all_reviews, positive_reviews, negative_reviews, review, image_url, brand, brand_url, country, perfume_name, release_year, perfume_url, note, urls, scores), key=lambda x: x[10], reverse=True)
 
             # Filter out null URLs and get top_k non-null results
-            non_null_results = [result for result in sorted_results if result[9] and result[5] is not None]
+            non_null_results = [
+                result for result in sorted_results 
+                if (result[4] != "Unknown" and result[21] != "Unknown") or (result[19] != "Unknown" and result[17] != "Unknown") or (result[19] != "Unknown" and result[4] != "Unknown") or (result[21] != "Unknown" and result[17] != "Unknown")
+            ]
             top_results = non_null_results[:top_k]
 
             # Return only the URL and the score for the top results, converting scores to float
@@ -116,9 +132,11 @@ async def generate_ai_answer(question):
     embed_answer = [list(result) for result in embed_answer]
     for result in embed_answer:
         for i, r in enumerate(result):
+            print(type(r))
             if r is None or r == '':
                 result[i] = "N/A"
-        result[10] = float(result[10])
+                
+        result[22] = float(result[22])
     to_give=[]
     for result in embed_answer:
         if result != "N/A":
@@ -127,7 +145,6 @@ async def generate_ai_answer(question):
     total = ""
     for result in to_give:
         try:
-            
             total += str(result) + "\n"
         except Exception as e:
             print(f"Error extracting data: {e}")
