@@ -61,68 +61,87 @@ def get_db_connection():
         print(f"Error connecting to the database: {e}")
         return None
 
-def rag(query, top_k=10):
+def rag(query, top_k=10, batch_size=1000):
     conn = get_db_connection()
     if conn is None:
         return []
 
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT * FROM rag")
-            results = cur.fetchall()
-            if not results:
-                return []
+            cur.execute("SELECT COUNT(*) FROM rag")
+            print('line 72')
+            total_records = cur.fetchone()[0]
+            num_batches = (total_records // batch_size) + 1
+            print('line 75')
+            accumulated_results = []
 
-            # Assuming the first column is the URL and the second column is the embedding
-            base_notes = [result[1] for result in results]
-            middle_notes = [result[2] for result in results]
-            top_notes = [result[3] for result in results]
-            notes = [result[4] for result in results]
-            name = [result[5] for result in results]
-            perfumer=[result[6] for result in results]
-            description = [result[7] for result in results]
-            gender=[result[8] for result in results]
-            concepts = [result[9] for result in results]
-            urls = [result[10] for result in results]
-            all_reviews = [result[11] for result in results]
-            positive_reviews = [result[12] for result in results]
-            negative_reviews = [result[13] for result in results]
-            review = [result[14] for result in results]
-            image_url = [result[15] for result in results]
-            brand=[result[16] for result in results]
-            brand_url=[result[17] for result in results]
-            country=[result[18] for result in results]
-            perfume_name=[result[19] for result in results]
-            release_year=[result[20] for result in results]
-            perfume_url=[result[21] for result in results]
-            note=[result[22] for result in results]
+            for batch_num in range(num_batches):
+                offset = batch_num * batch_size
+                cur.execute(f"SELECT * FROM rag LIMIT {batch_size} OFFSET {offset}")
+                results = cur.fetchall()
+                print('line 81')
+                if not results:
+                    continue
 
-            embeddings_matrix = np.array([result[23] for result in results], dtype=np.float32)
+                base_notes = [result[1] for result in results]
+                middle_notes = [result[2] for result in results]
+                top_notes = [result[3] for result in results]
+                notes = [result[4] for result in results]
+                name = [result[5] for result in results]
+                perfumer = [result[6] for result in results]
+                description = [result[7] for result in results]
+                gender = [result[8] for result in results]
+                concepts = [result[9] for result in results]
+                urls = [result[10] for result in results]
+                all_reviews = [result[11] for result in results]
+                positive_reviews = [result[12] for result in results]
+                negative_reviews = [result[13] for result in results]
+                review = [result[14] for result in results]
+                image_url = [result[15] for result in results]
+                brand = [result[16] for result in results]
+                brand_url = [result[17] for result in results]
+                country = [result[18] for result in results]
+                perfume_name = [result[19] for result in results]
+                release_year = [result[20] for result in results]
+                perfume_url = [result[21] for result in results]
+                note = [result[22] for result in results]
 
-            inputs = etokenizer(query, return_tensors='pt')
-            with torch.no_grad():
-                outputs = emodel(**inputs)
-            query_embedding = outputs.last_hidden_state.mean(dim=1).cpu().numpy().astype(np.float32)
-            query_embedding = query_embedding.reshape(1, -1)
-            embeddings_matrix = embeddings_matrix.reshape(len(results), -1)
-
-            scores = util.pytorch_cos_sim(query_embedding, embeddings_matrix)[0].cpu().numpy()
-            sorted_results = sorted(zip(base_notes, middle_notes, top_notes, notes, name, perfumer, description, gender, concepts, all_reviews, positive_reviews, negative_reviews, review, image_url, brand, brand_url, country, perfume_name, release_year, perfume_url, note, urls, scores), key=lambda x: x[10], reverse=True)
-
+                # Filter out invalid embeddings
+                valid_results = [result for result in results if isinstance(result[23], list) and all(isinstance(x, (float, int)) for x in result[23])]
+                embeddings_matrix = np.array([result[23] for result in valid_results], dtype=np.float32)
+                print('line 111')
+                inputs = etokenizer(query, return_tensors='pt')
+                with torch.no_grad():
+                    outputs = emodel(**inputs)
+                query_embedding = outputs.last_hidden_state.mean(dim=1).cpu().numpy().astype(np.float32)
+                query_embedding = query_embedding.reshape(1, -1)
+                embeddings_matrix = embeddings_matrix.reshape(len(valid_results), -1)
+                print('line 118')
+                scores = util.pytorch_cos_sim(query_embedding, embeddings_matrix)[0].cpu().numpy()
+                batch_results = sorted(zip(base_notes, middle_notes, top_notes, notes, name, perfumer, description, gender, concepts, all_reviews, positive_reviews, negative_reviews, review, image_url, brand, brand_url, country, perfume_name, release_year, perfume_url, note, urls, scores), key=lambda x: x[22], reverse=True)
+                print('line 121')
+                accumulated_results.extend(batch_results)
+            print('line 123')
             # Filter out null URLs and get top_k non-null results
             non_null_results = [
-                result for result in sorted_results 
+                result for result in accumulated_results 
                 if (result[4] != "Unknown" and result[21] != "Unknown") or (result[19] != "Unknown" and result[17] != "Unknown") or (result[19] != "Unknown" and result[4] != "Unknown") or (result[21] != "Unknown" and result[17] != "Unknown")
             ]
-            top_results = non_null_results[:top_k]
+            print('line 129')
+            top_results = sorted(non_null_results, key=lambda x: x[22], reverse=True)[:top_k]
 
             # Return only the URL and the score for the top results, converting scores to float
             return top_results
+
     except Exception as e:
         print(f"Error querying embeddings: {e}")
         return []
     finally:
         conn.close()
+
+
+
+
 async def generate_ai_answer(question):
     global messages
     start=time.time()
@@ -208,22 +227,28 @@ async def ai():
     asyncio.create_task(background_task(task_id, question))
     return jsonify({'task_id': task_id})
 
-def query_embeddings(query, top_k=50):
+def query_embeddings(query, top_k=50, batch_size=1000):
     conn = get_db_connection()
     if conn is None:
         return []
 
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT * FROM final")
-            results = cur.fetchall()
-            if not results:
-                return []
+            cur.execute("SELECT COUNT(*) FROM final")
+            total_records = cur.fetchone()[0]
+            num_batches = (total_records // batch_size) + 1
 
-            # Assuming the first column is the URL and the second column is the embedding
-            urls = [result[10] for result in results]
-            purl=[result[21] for result in results]
-            if purl is None:
+            accumulated_results = []
+
+            for batch_num in range(num_batches):
+                offset = batch_num * batch_size
+                cur.execute(f"SELECT * FROM final LIMIT {batch_size} OFFSET {offset}")
+                results = cur.fetchall()
+                if not results:
+                    continue
+
+                urls = [result[10] for result in results]
+                purl = [result[21] for result in results]
                 embeddings_matrix = np.array([result[15] for result in results], dtype=np.float32)
 
                 inputs = etokenizer(query, return_tensors='pt')
@@ -234,51 +259,16 @@ def query_embeddings(query, top_k=50):
                 embeddings_matrix = embeddings_matrix.reshape(len(results), -1)
 
                 scores = util.pytorch_cos_sim(query_embedding, embeddings_matrix)[0].cpu().numpy()
-                sorted_results = sorted(zip(urls, scores), key=lambda x: x[1], reverse=True)
+                batch_results = sorted(zip(urls, purl, scores), key=lambda x: x[2], reverse=True)
 
-                # Filter out null URLs and get top_k non-null results
-                non_null_results = [result for result in sorted_results if result[0] is not None]
-                top_results = non_null_results[:top_k]
+                accumulated_results.extend(batch_results)
 
-                # If there are not enough non-null results, continue searching
-                if len(top_results) < top_k:
-                    additional_results = sorted_results[len(non_null_results):]
-                    for result in additional_results:
-                        if result[0] is not None:
-                            top_results.append(result)
-                            if len(top_results) == top_k:
-                                break
+            # Filter out null URLs and get top_k non-null results
+            non_null_results = [result for result in accumulated_results if result[0] is not None or result[1] is not None]
+            top_results = sorted(non_null_results, key=lambda x: x[2], reverse=True)[:top_k]
 
-                # Return only the URL and the score for the top results, converting scores to float
-                return [(result[0], float(result[1])) for result in top_results]
-            elif urls is None:
-                embeddings_matrix = np.array([result[15] for result in results], dtype=np.float32)
+            return [(result[0] if result[0] is not None else result[1], float(result[2])) for result in top_results]
 
-                inputs = etokenizer(query, return_tensors='pt')
-                with torch.no_grad():
-                    outputs = emodel(**inputs)
-                query_embedding = outputs.last_hidden_state.mean(dim=1).cpu().numpy().astype(np.float32)
-                query_embedding = query_embedding.reshape(1, -1)
-                embeddings_matrix = embeddings_matrix.reshape(len(results), -1)
-
-                scores = util.pytorch_cos_sim(query_embedding, embeddings_matrix)[0].cpu().numpy()
-                sorted_results = sorted(zip(purl, scores), key=lambda x: x[1], reverse=True)
-
-                # Filter out null URLs and get top_k non-null results
-                non_null_results = [result for result in sorted_results if result[0] is not None]
-                top_results = non_null_results[:top_k]
-
-                # If there are not enough non-null results, continue searching
-                if len(top_results) < top_k:
-                    additional_results = sorted_results[len(non_null_results):]
-                    for result in additional_results:
-                        if result[0] is not None:
-                            top_results.append(result)
-                            if len(top_results) == top_k:
-                                break
-
-                # Return only the URL and the score for the top results, converting scores to float
-                return [(result[0], float(result[1])) for result in top_results]
     except Exception as e:
         print(f"Error querying embeddings: {e}")
         return []
