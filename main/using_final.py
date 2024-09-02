@@ -10,7 +10,7 @@ import aiohttp
 import time
 import ijson
 
-app = Flask(__name__)
+app = Flask("im awesome")
 
 # Load the locally trained model and tokenizer
 model_path = r'C:\Users\default.DESKTOP-7FKFEEG\project\model2'

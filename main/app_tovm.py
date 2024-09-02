@@ -2,7 +2,7 @@
 
 import numpy as np
 import psycopg2
-from transformers import BertTokenizer, BertModel, pipeline, AutoModelForCausalLM, AutoTokenizer
+from transformers import pipeline, AutoModelForCausalLM, AutoTokenizer, AutoModel
 from flask import Flask, request, jsonify, render_template
 from sentence_transformers import util
 import torch
@@ -17,8 +17,10 @@ app = Flask(__name__)
 # Load the locally trained model and tokenizer
 model_path = r'C:\Users\default.DESKTOP-7FKFEEG\project\model2'
 tokenizer_path = r'C:\Users\default.DESKTOP-7FKFEEG\project\tokenizer2'
-etokenizer = BertTokenizer.from_pretrained(tokenizer_path)
-emodel = BertModel.from_pretrained(model_path)
+emodel_id = 'mixedbread-ai/mxbai-embed-large-v1'
+
+etokenizer = AutoTokenizer.from_pretrained(emodel_id)
+emodel = AutoModel.from_pretrained(emodel_id)
 
 # Load the text generation model
 
