@@ -80,8 +80,9 @@ def remove_unknown_urls():
 
 remove_unknown_urls()
 
-
+start_for_ai=time.time()
 def rag(query, top_k=10, batch_size=1000):
+    start_for_ai=time.time()
     conn = get_db_connection()
     if conn is None:
         return []
@@ -99,9 +100,7 @@ def rag(query, top_k=10, batch_size=1000):
                 results = cur.fetchall()
                 
                 # Log the structure of the results
-                if results:
-                    print("has results!")
-                else:
+                if not results:
                     print(f"Batch {batch_num} returned no results.")
                     continue
 
@@ -179,7 +178,6 @@ async def generate_ai_answer(question):
     embed_answer = [list(result) for result in embed_answer]
     for result in embed_answer:
         for i, r in enumerate(result):
-            print(type(r))
             if type(r)==float:
                 result[i]=str(r)
             if r is None or r == '':
@@ -204,16 +202,14 @@ async def generate_ai_answer(question):
         # Clear GPU memory before inference
         torch.cuda.empty_cache()
         outputs=[]
-        print(type(text_gen_pipeline))
-        print(type(outputs))
         
         outputs = text_gen_pipeline(messages, max_new_tokens=1000)  # Reduce max_new_tokens
         print("AI answer generated.")
 
         # Clear GPU memory after inference
         torch.cuda.empty_cache()
-        end=time.time()
-        print("Time taken to generate answer: ",end-start)
+        end_for_ai=time.time()
+        print("Time taken to generate answer: ",end_for_ai-start_for_ai)
         print(outputs[0]['generated_text'][-1])
         return outputs[0]['generated_text'][-1]
 
